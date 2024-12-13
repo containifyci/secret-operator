@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,8 +12,16 @@ import (
 	"strings"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
-	"google.golang.org/api/iterator"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/containifyci/go-self-update/pkg/systemd"
+	"github.com/containifyci/go-self-update/pkg/updater"
+	"google.golang.org/api/iterator"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 type TokenMetadata struct {
@@ -29,13 +38,43 @@ type SecretResponse struct {
 var predefinedTokenName = "SECRET_OPERATOR_AUTHENTICATION_TOKEN" // Replace with the desired token secret name
 
 func main() {
+	fmt.Printf("secret-operator-server %s, commit %s, built at %s\n", version, commit, date)
+
+	command := "run"
+	if len(os.Args) >= 2 {
+		command = os.Args[1]
+	}
+
+	// Get the command
+	switch command {
+	case "update":
+		u := updater.NewUpdater(
+			"secret-operator-server", "containifyci", "secret-operator", version,
+			updater.WithUpdateHook(systemd.SystemdRestartHook("temporal-worker")),
+		)
+		updated, err := u.SelfUpdate()
+		if err != nil {
+			fmt.Printf("Update failed %+v\n", err)
+		}
+		if updated {
+			fmt.Println("Update completed successfully!")
+			return
+		}
+		fmt.Println("Already up-to-date")
+	default:
+		start()
+	}
+}
+
+func start() {
 	http.HandleFunc("/retrieve-secrets", RetrieveSecretsHandler)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	log.Printf("Starting server on port %s", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
+	err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
@@ -161,18 +200,17 @@ func getSecretsForService(ctx context.Context, client *secretmanager.Client, ser
 
 		// Check if the secret matches the service name (example: use labels or naming conventions)
 		// if strings.Contains(secret.Name, serviceName) {
-			// Access the secret value
-			resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
-				Name: fmt.Sprintf("%s/versions/latest", secret.Name),
-			})
-			if err != nil {
-				log.Printf("Failed to access secret %s: %v", secret.Name, err)
-				continue
-			}
-			secrets[secret.Name] = string(resp.Payload.Data)
+		// Access the secret value
+		resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
+			Name: fmt.Sprintf("%s/versions/latest", secret.Name),
+		})
+		if err != nil {
+			log.Printf("Failed to access secret %s: %v", secret.Name, err)
+			continue
+		}
+		secrets[secret.Name] = string(resp.Payload.Data)
 		// }
 	}
 
 	return secrets, nil
 }
-

@@ -14,7 +14,14 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/containifyci/go-self-update/pkg/updater"
 	"github.com/golang/protobuf/ptypes/timestamp"
+)
+
+var (
+	version          = "dev"
+	commit           = "none"
+	date             = "unknown"
 )
 
 var predefinedTokenName = "SECRET_OPERATOR_AUTHENTICATION_TOKEN" // Replace with the desired token secret name
@@ -28,6 +35,34 @@ type TokenMetadata struct {
 }
 
 func main() {
+	fmt.Printf("secret-operator-client %s, commit %s, built at %s\n", version, commit, date)
+
+	command := "run"
+	if len(os.Args) >= 2 {
+		command = os.Args[1]
+	}
+
+	// Get the command
+	switch command {
+	case "update":
+		u := updater.NewUpdater(
+			"secret-operator-client", "containifyci", "secret-operator", version,
+		)
+		updated, err := u.SelfUpdate()
+		if err != nil {
+			fmt.Printf("Update failed %+v\n", err)
+		}
+		if updated {
+			fmt.Println("Update completed successfully!")
+			return
+		}
+		fmt.Println("Already up-to-date")
+	default:
+		run()
+	}
+}
+
+func run() {
 	// Define CLI flags
 	serviceName := flag.String("serviceName", "", "The name of the service")
 	flag.Parse()
@@ -66,7 +101,6 @@ func main() {
 	if err := saveTokenToSecretManager(projectID, token); err != nil {
 		log.Fatalf("Failed to save token to Secret Manager: %v", err)
 	}
-
 }
 
 func saveTokenToSecretManager(projectID, token string) error {
