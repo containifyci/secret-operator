@@ -1,0 +1,33 @@
+version: 2
+
+builds:
+  - id: secret-operator-client
+    env:
+      - CGO_ENABLED=0
+    main: cmd/client/main.go
+    goos:
+      - linux
+      - darwin
+  - id: secret-operator-server
+    env:
+      - CGO_ENABLED=0
+    main: cmd/server/main.go
+    goos:
+      - linux
+      - darwin
+
+archives:
+  - id: secret-operator-client
+    format: binary
+    name_template: >-
+      {{ .ProjectName }}_client_
+      {{- .Os }}_
+      {{- .Arch }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+  - id: secret-operator-server
+    format: binary
+    name_template: >-
+      {{ .ProjectName }}_server_
+      {{- .Os }}_
+      {{- .Arch }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
