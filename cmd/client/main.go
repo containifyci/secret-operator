@@ -12,6 +12,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/containifyci/secret-operator/pkg/model"
+
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/containifyci/go-self-update/pkg/updater"
@@ -26,18 +28,10 @@ var (
 
 var predefinedTokenName = "SECRET_OPERATOR_AUTHENTICATION_TOKEN" // Replace with the desired token secret name
 
-// TokenMetadata represents the structure of metadata encoded in the token.
-type TokenMetadata struct {
-	ServiceName string `json:"serviceName"`
-	ClientIP    string `json:"clientIP"`
-	Nonce       int64  `json:"nonce"`       // Timestamp in nanoseconds
-	RandomValue string `json:"randomValue"` // Random cryptographic value
-}
-
 func main() {
 	fmt.Printf("secret-operator-client %s, commit %s, built at %s\n", version, commit, date)
 
-	command := "run"
+	command := "generate"
 	if len(os.Args) >= 2 {
 		command = os.Args[1]
 	}
@@ -57,12 +51,13 @@ func main() {
 			return
 		}
 		fmt.Println("Already up-to-date")
+	case "generate":
 	default:
-		run()
+		generate()
 	}
 }
 
-func run() {
+func generate() {
 	// Define CLI flags
 	serviceName := flag.String("serviceName", "", "The name of the service")
 	flag.Parse()
@@ -78,7 +73,7 @@ func run() {
 	}
 
 	// Generate token
-	tokenMetadata := TokenMetadata{
+	tokenMetadata := model.TokenMetadata{
 		ServiceName: *serviceName,
 		ClientIP:    clientIP,
 		Nonce:       time.Now().UnixNano(), // Add a high-resolution timestamp
@@ -181,7 +176,7 @@ func generateRandomValue(length int) (string, error) {
 }
 
 // generateToken encodes the token metadata as a Base64 JSON string.
-func generateToken(metadata TokenMetadata) (string, error) {
+func generateToken(metadata model.TokenMetadata) (string, error) {
 	metadataBytes, err := json.Marshal(metadata)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal metadata: %w", err)

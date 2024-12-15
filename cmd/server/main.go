@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/containifyci/secret-operator/pkg/model"
+
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/containifyci/go-self-update/pkg/systemd"
@@ -23,17 +25,6 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
-
-type TokenMetadata struct {
-	ServiceName string `json:"serviceName"`
-	ClientIP    string `json:"clientIP"`
-	Nonce       int64  `json:"nonce"`       // Timestamp in nanoseconds
-	RandomValue string `json:"randomValue"` // Random cryptographic value
-}
-
-type SecretResponse struct {
-	Secrets map[string]string `json:"secrets"`
-}
 
 var predefinedTokenName = "SECRET_OPERATOR_AUTHENTICATION_TOKEN" // Replace with the desired token secret name
 
@@ -118,7 +109,7 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := SecretResponse{Secrets: secrets}
+	response := model.NewSecretResponse(secrets)
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
@@ -128,7 +119,7 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, token string) (*TokenMetadata, error) {
+func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, token string) (*model.TokenMetadata, error) {
 	name := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", os.Getenv("GCP_PROJECT_ID"), predefinedTokenName)
 
 	// Access the secret version
@@ -149,18 +140,18 @@ func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, t
 		return nil, fmt.Errorf("error parsing token metadata: %w", err)
 	}
 
-	// Delete the token after successful validation
-	// if err := client.DeleteSecret(ctx, &secretmanagerpb.DeleteSecretRequest{
-	// 	Name: fmt.Sprintf("projects/%s/secrets/%s", os.Getenv("GCP_PROJECT_ID"), predefinedTokenName),
-	// }); err != nil {
-	// 	log.Printf("Failed to delete token secret: %v", err)
-	// }
+	//Delete the token after successful validation
+	if err := client.DeleteSecret(ctx, &secretmanagerpb.DeleteSecretRequest{
+		Name: fmt.Sprintf("projects/%s/secrets/%s", os.Getenv("GCP_PROJECT_ID"), predefinedTokenName),
+	}); err != nil {
+		log.Printf("Failed to delete token secret: %v", err)
+	}
 
 	return &metadata, nil
 }
 
-func parseMetadataFromToken(token string) (TokenMetadata, error) {
-	var metadata TokenMetadata
+func parseMetadataFromToken(token string) (model.TokenMetadata, error) {
+	var metadata model.TokenMetadata
 
 	// Decode the Base64 token
 	decoded, err := base64.RawURLEncoding.DecodeString(token)
