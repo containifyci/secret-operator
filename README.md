@@ -120,6 +120,7 @@ Generated Token: eyJzZXJ2aWNlTmFtZSI6Im15LXNlcnZpY2UiLCJjbGllbnRJUC...<rest_of_t
 ## Future Enhancements
 - **Rate Limiting**: Limit the number of tokens generated or used per client.
 - **Enhanced Logging**: Add logs for token validation and secret access requests.
+- **Code Rerfactoring**: Reduce code duplication in client and server package by moving it to shared package. Also add unit tests and try to reach test coverage of 90 % 
 
 ---
 
