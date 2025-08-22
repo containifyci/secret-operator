@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/containifyci/secret-operator/internal"
 	"github.com/containifyci/secret-operator/pkg/model"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -26,8 +27,6 @@ var (
 	date    = "unknown"
 )
 
-var predefinedTokenName = "SECRET_OPERATOR_AUTHENTICATION_TOKEN" // Replace with the desired token secret name
-
 func main() {
 	fmt.Printf("secret-operator-server %s, commit %s, built at %s\n", version, commit, date)
 
@@ -36,12 +35,11 @@ func main() {
 		command = os.Args[1]
 	}
 
-	// Get the command
 	switch command {
 	case "update":
 		u := updater.NewUpdater(
 			"secret-operator-server", "containifyci", "secret-operator", version,
-			updater.WithUpdateHook(systemd.SystemdRestartHook("temporal-worker")),
+			updater.WithUpdateHook(systemd.SystemdRestartHook("secret-operator-server")),
 		)
 		updated, err := u.SelfUpdate()
 		if err != nil {
@@ -120,7 +118,7 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, token string) (*model.TokenMetadata, error) {
-	name := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", os.Getenv("GCP_PROJECT_ID"), predefinedTokenName)
+	name := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", os.Getenv("GCP_PROJECT_ID"), internal.AuthenticationTokenName)
 
 	// Access the secret version
 	resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
@@ -142,7 +140,7 @@ func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, t
 
 	//Delete the token after successful validation
 	if err := client.DeleteSecret(ctx, &secretmanagerpb.DeleteSecretRequest{
-		Name: fmt.Sprintf("projects/%s/secrets/%s", os.Getenv("GCP_PROJECT_ID"), predefinedTokenName),
+		Name: fmt.Sprintf("projects/%s/secrets/%s", os.Getenv("GCP_PROJECT_ID"), internal.AuthenticationTokenName),
 	}); err != nil {
 		log.Printf("Failed to delete token secret: %v", err)
 	}
@@ -189,9 +187,6 @@ func getSecretsForService(ctx context.Context, client *secretmanager.Client, ser
 			return nil, fmt.Errorf("error listing secrets: %w", err)
 		}
 
-		// Check if the secret matches the service name (example: use labels or naming conventions)
-		// if strings.Contains(secret.Name, serviceName) {
-		// Access the secret value
 		resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
 			Name: fmt.Sprintf("%s/versions/latest", secret.Name),
 		})
@@ -200,7 +195,6 @@ func getSecretsForService(ctx context.Context, client *secretmanager.Client, ser
 			continue
 		}
 		secrets[secret.Name] = string(resp.Payload.Data)
-		// }
 	}
 
 	return secrets, nil

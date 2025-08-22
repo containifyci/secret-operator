@@ -54,6 +54,7 @@ func main() {
 	case "fetch":
 		fetch()
 	case "generate":
+		fallthrough
 	default:
 		generate()
 	}
