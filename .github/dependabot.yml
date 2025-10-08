@@ -7,8 +7,6 @@ updates:
     schedule:
       interval: "weekly"
       day: "sunday"
-    commit-message:
-      include: "scope"
     groups:
       minor:
         patterns:
@@ -21,8 +19,6 @@ updates:
     schedule:
       interval: "weekly"
       day: "sunday"
-    commit-message:
-      include: "scope"
     groups:
       minor:
         patterns:
@@ -35,8 +31,6 @@ updates:
     schedule:
       interval: "weekly"
       day: "sunday"
-    commit-message:
-      include: "scope"
     groups:
       minor:
         patterns:
