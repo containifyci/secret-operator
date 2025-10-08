@@ -92,7 +92,12 @@ func fetch() {
 		fmt.Printf("Error making request: %v\n", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			fmt.Printf("Error closing response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("Non-OK HTTP status: %s\n", resp.Status)
@@ -116,7 +121,12 @@ func fetch() {
 		fmt.Printf("Error creating .env file: %v\n", err)
 		os.Exit(1)
 	}
-	defer envFile.Close()
+	defer func() {
+		err := envFile.Close()
+		if err != nil {
+			fmt.Printf("Error closing .env file: %v\n", err)
+		}
+	}()
 
 	for _, secret := range secretResponse.Secrets {
 		line := fmt.Sprintf("%s=\"%s\"\n", secret.Key, secret.Value)
@@ -170,7 +180,12 @@ func saveTokenToSecretManager(projectID, token string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create Secret Manager client: %w", err)
 	}
-	defer client.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			fmt.Printf("Error closing Secret Manager client: %v\n", err)
+		}
+	}()
 
 	secretID := internal.AuthenticationTokenName
 	secretName := fmt.Sprintf("projects/%s/secrets/%s", projectID, secretID)

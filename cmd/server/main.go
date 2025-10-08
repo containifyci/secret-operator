@@ -76,7 +76,12 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error creating Secret Manager client: %v", err)
 		return
 	}
-	defer client.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			log.Printf("Error closing Secret Manager client: %v", err)
+		}
+	}()
 
 	// Retrieve token from the request header
 	token := r.Header.Get("Authorization")
