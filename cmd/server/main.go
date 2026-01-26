@@ -105,14 +105,14 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve secrets based on the service name
-	secrets, err := getSecretsForService(ctx, client, serviceName)
+	envSecrets, fileSecrets, err := getSecretsForService(ctx, client, serviceName)
 	if err != nil {
 		http.Error(w, "Failed to retrieve secrets", http.StatusInternalServerError)
 		log.Printf("Error retrieving secrets: %v", err)
 		return
 	}
 
-	response := model.NewSecretResponse(secrets)
+	response := model.NewSecretResponse(envSecrets, fileSecrets)
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
@@ -170,8 +170,9 @@ func parseMetadataFromToken(token string) (model.TokenMetadata, error) {
 	return metadata, nil
 }
 
-func getSecretsForService(ctx context.Context, client *secretmanager.Client, serviceName string) (map[string]string, error) {
-	secrets := make(map[string]string)
+func getSecretsForService(ctx context.Context, client *secretmanager.Client, serviceName string) (map[string]model.EnvSecret, map[string]model.FileSecret, error) {
+	envSecrets := make(map[string]model.EnvSecret)
+	fileSecrets := make(map[string]model.FileSecret)
 	filter := fmt.Sprintf("labels.service=%s", serviceName)
 
 	it := client.ListSecrets(ctx, &secretmanagerpb.ListSecretsRequest{
@@ -189,7 +190,7 @@ func getSecretsForService(ctx context.Context, client *secretmanager.Client, ser
 		}
 		if err != nil {
 			fmt.Printf("Error listing secrets: %v\n", err)
-			return nil, fmt.Errorf("error listing secrets: %w", err)
+			return nil, nil, fmt.Errorf("error listing secrets: %w", err)
 		}
 
 		resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
@@ -199,8 +200,25 @@ func getSecretsForService(ctx context.Context, client *secretmanager.Client, ser
 			log.Printf("Failed to access secret %s: %v", secret.Name, err)
 			continue
 		}
-		secrets[secret.Name] = string(resp.Payload.Data)
+
+		value := string(resp.Payload.Data)
+		metadata := model.ParseSecretMetadata(secret.Labels)
+
+		if metadata.Type == model.SecretTypeFile {
+			// File secret
+			filename := metadata.Filename
+			if filename == "" {
+				// Use secret name as filename if not specified
+				parts := strings.Split(secret.Name, "/")
+				filename = parts[len(parts)-1]
+			}
+			mode := model.DetermineFileMode(filename)
+			fileSecrets[secret.Name] = model.NewFileSecret(secret.Name, value, filename, mode)
+		} else {
+			// Env secret (default)
+			envSecrets[secret.Name] = model.NewEnvSecret(secret.Name, value)
+		}
 	}
 
-	return secrets, nil
+	return envSecrets, fileSecrets, nil
 }

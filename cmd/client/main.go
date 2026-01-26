@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/containifyci/secret-operator/internal"
@@ -61,11 +63,11 @@ func main() {
 }
 
 func fetch() {
-	var envfile, host, token string
+	var output, host, token string
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flag.CommandLine = fs
 	fs.StringVar(&token, "token", "", "The name of the token secret")
-	fs.StringVar(&envfile, "envfile", ".env", "THe env file to write the secrets to")
+	fs.StringVar(&output, "output", ".", "The output directory for secrets")
 	fs.StringVar(&host, "host", "https://wg.fr123k.uk:8443", "The host of the secret operator server to use")
 	_ = fs.Parse(os.Args[2:])
 
@@ -116,27 +118,100 @@ func fetch() {
 		os.Exit(1)
 	}
 
-	envFile, err := os.Create(envfile)
-	if err != nil {
-		fmt.Printf("Error creating .env file: %v\n", err)
+	// Write env secrets to .env file
+	if err := writeEnvSecrets(output, secretResponse.EnvSecrets); err != nil {
+		fmt.Printf("Error writing env secrets: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() {
-		err := envFile.Close()
-		if err != nil {
-			fmt.Printf("Error closing .env file: %v\n", err)
-		}
-	}()
 
-	for _, secret := range secretResponse.Secrets {
+	// Write file secrets to individual files
+	if err := writeFileSecrets(output, secretResponse.FileSecrets); err != nil {
+		fmt.Printf("Error writing file secrets: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Secrets written to %s directory successfully.\n", output)
+}
+
+// writeEnvSecrets writes env secrets to a .env file in the output directory.
+func writeEnvSecrets(outputDir string, secrets map[string]model.EnvSecret) error {
+	if len(secrets) == 0 {
+		return nil
+	}
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	envFilePath := filepath.Join(outputDir, ".env")
+	envFile, err := os.OpenFile(envFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create .env file: %w", err)
+	}
+	defer envFile.Close()
+
+	for _, secret := range secrets {
 		line := fmt.Sprintf("%s=\"%s\"\n", secret.Key, secret.Value)
 		if _, err := envFile.WriteString(line); err != nil {
-			fmt.Printf("Error writing to .env file: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to write to .env file: %w", err)
 		}
 	}
 
-	fmt.Printf("Secrets written to %s file successfully. \n", envfile)
+	fmt.Printf("Env secrets written to %s\n", envFilePath)
+	return nil
+}
+
+// writeFileSecrets writes each file secret to its own file with proper permissions.
+func writeFileSecrets(outputDir string, secrets map[string]model.FileSecret) error {
+	if len(secrets) == 0 {
+		return nil
+	}
+
+	for _, secret := range secrets {
+		// Validate filename for security
+		if err := model.ValidateFilename(secret.Filename); err != nil {
+			return fmt.Errorf("invalid filename %q: %w", secret.Filename, err)
+		}
+
+		// Build full path
+		fullPath := filepath.Join(outputDir, secret.Filename)
+
+		// Ensure parent directory exists
+		dir := filepath.Dir(fullPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+
+		// Parse file mode
+		mode, err := parseFileMode(secret.Mode)
+		if err != nil {
+			return fmt.Errorf("invalid file mode %q: %w", secret.Mode, err)
+		}
+
+		// Write file
+		if err := os.WriteFile(fullPath, []byte(secret.Value), mode); err != nil {
+			return fmt.Errorf("failed to write file %s: %w", fullPath, err)
+		}
+
+		fmt.Printf("File secret written to %s (mode %s)\n", fullPath, secret.Mode)
+	}
+
+	return nil
+}
+
+// parseFileMode parses a string file mode (e.g., "0600") to os.FileMode.
+func parseFileMode(modeStr string) (os.FileMode, error) {
+	if modeStr == "" {
+		return 0600, nil // secure default
+	}
+
+	mode, err := strconv.ParseUint(modeStr, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse mode: %w", err)
+	}
+
+	return os.FileMode(mode), nil
 }
 
 func generate() {
