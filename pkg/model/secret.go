@@ -40,6 +40,7 @@ type (
 
 // ParseSecretMetadata extracts secret metadata from GCP secret labels.
 // Secrets without a "type" label default to "env" type for backward compatibility.
+// The filename label is decoded from GCP-compatible format (see DecodeFilename).
 func ParseSecretMetadata(labels map[string]string) SecretMetadata {
 	secretType := SecretTypeEnv
 	if t, ok := labels["type"]; ok && t == "file" {
@@ -48,13 +49,39 @@ func ParseSecretMetadata(labels map[string]string) SecretMetadata {
 
 	filename := ""
 	if f, ok := labels["filename"]; ok {
-		filename = f
+		filename = DecodeFilename(f)
 	}
 
 	return SecretMetadata{
 		Type:     secretType,
 		Filename: filename,
 	}
+}
+
+// EncodeFilename converts a filename to GCP label-compatible format.
+// GCP labels only allow: lowercase letters, numbers, hyphens (-), underscores (_).
+// Encoding: "__" represents "/", "--" represents "."
+// Example: "certs/tls.crt" -> "certs__tls--crt"
+func EncodeFilename(filename string) string {
+	// Order matters: encode existing special sequences first to avoid conflicts
+	result := strings.ReplaceAll(filename, "__", "___") // escape existing __
+	result = strings.ReplaceAll(result, "--", "---")    // escape existing --
+	result = strings.ReplaceAll(result, "/", "__")
+	result = strings.ReplaceAll(result, ".", "--")
+	return strings.ToLower(result)
+}
+
+// DecodeFilename converts a GCP label value back to a filename.
+// Decoding: "__" becomes "/", "--" becomes "."
+// Example: "certs__tls--crt" -> "certs/tls.crt"
+func DecodeFilename(encoded string) string {
+	// Decode in reverse order of encoding
+	result := strings.ReplaceAll(encoded, "__", "/")
+	result = strings.ReplaceAll(result, "--", ".")
+	// Handle escaped sequences (triple becomes single original)
+	result = strings.ReplaceAll(result, "//_", "__")
+	result = strings.ReplaceAll(result, "..-", "--")
+	return result
 }
 
 // DetermineFileMode returns the appropriate file mode based on filename patterns.

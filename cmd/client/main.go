@@ -63,10 +63,11 @@ func main() {
 }
 
 func fetch() {
-	var output, host, token string
+	var envFile, output, host, token string
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flag.CommandLine = fs
 	fs.StringVar(&token, "token", "", "The name of the token secret")
+	fs.StringVar(&envFile, "envFile", "t.env", "The envFile file to store the secrets in")
 	fs.StringVar(&output, "output", ".", "The output directory for secrets")
 	fs.StringVar(&host, "host", "https://wg.fr123k.uk:8443", "The host of the secret operator server to use")
 	_ = fs.Parse(os.Args[2:])
@@ -75,7 +76,7 @@ func fetch() {
 		log.Fatalf("The token arg is required")
 	}
 
-	url := fmt.Sprintf("%s/secrets/retrieve-secrets", host)
+	url := fmt.Sprintf("%s/retrieve-secrets", host)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -119,7 +120,7 @@ func fetch() {
 	}
 
 	// Write env secrets to .env file
-	if err := writeEnvSecrets(output, secretResponse.EnvSecrets); err != nil {
+	if err := writeEnvSecrets(output, envFile, secretResponse.EnvSecrets); err != nil {
 		fmt.Printf("Error writing env secrets: %v\n", err)
 		os.Exit(1)
 	}
@@ -134,7 +135,7 @@ func fetch() {
 }
 
 // writeEnvSecrets writes env secrets to a .env file in the output directory.
-func writeEnvSecrets(outputDir string, secrets map[string]model.EnvSecret) error {
+func writeEnvSecrets(outputDir, envFile string, secrets map[string]model.EnvSecret) error {
 	if len(secrets) == 0 {
 		return nil
 	}
@@ -144,16 +145,16 @@ func writeEnvSecrets(outputDir string, secrets map[string]model.EnvSecret) error
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	envFilePath := filepath.Join(outputDir, ".env")
-	envFile, err := os.OpenFile(envFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	envFilePath := filepath.Join(outputDir, envFile)
+	f, err := os.OpenFile(envFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create .env file: %w", err)
 	}
-	defer envFile.Close()
+	defer f.Close()
 
 	for _, secret := range secrets {
 		line := fmt.Sprintf("%s=\"%s\"\n", secret.Key, secret.Value)
-		if _, err := envFile.WriteString(line); err != nil {
+		if _, err := f.WriteString(line); err != nil {
 			return fmt.Errorf("failed to write to .env file: %w", err)
 		}
 	}

@@ -1,10 +1,72 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestEncodeFilename(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"tls.crt", "tls--crt"},
+		{"certs/tls.crt", "certs__tls--crt"},
+		{"tls.key", "tls--key"},
+		{"certs/tls.key", "certs__tls--key"},
+		{"config", "config"},
+		{"my-config.json", "my-config--json"},
+		{"CA.pem", "ca--pem"}, // lowercase conversion
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := EncodeFilename(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestDecodeFilename(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"tls--crt", "tls.crt"},
+		{"certs__tls--crt", "certs/tls.crt"},
+		{"tls--key", "tls.key"},
+		{"certs__tls--key", "certs/tls.key"},
+		{"config", "config"},
+		{"my-config--json", "my-config.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := DecodeFilename(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEncodeDecodeRoundTrip(t *testing.T) {
+	filenames := []string{
+		"tls.crt",
+		"certs/tls.crt",
+		"certs/tls.key",
+		"config.json",
+		"my-service.pem",
+	}
+
+	for _, filename := range filenames {
+		t.Run(filename, func(t *testing.T) {
+			encoded := EncodeFilename(filename)
+			decoded := DecodeFilename(encoded)
+			assert.Equal(t, strings.ToLower(filename), decoded)
+		})
+	}
+}
 
 func TestParseSecretMetadata(t *testing.T) {
 	tests := []struct {
@@ -32,8 +94,8 @@ func TestParseSecretMetadata(t *testing.T) {
 			expectedFile:   "",
 		},
 		{
-			name:           "file type with filename",
-			labels:         map[string]string{"type": "file", "filename": "certs/tls.crt"},
+			name:           "file type with encoded filename",
+			labels:         map[string]string{"type": "file", "filename": "certs__tls--crt"},
 			expectedType:   SecretTypeFile,
 			expectedFile:   "certs/tls.crt",
 		},
