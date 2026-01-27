@@ -69,7 +69,7 @@ func fetch() {
 	fs.StringVar(&token, "token", "", "The name of the token secret")
 	fs.StringVar(&envFile, "envFile", "t.env", "The envFile file to store the secrets in")
 	fs.StringVar(&output, "output", ".", "The output directory for secrets")
-	fs.StringVar(&host, "host", "https://wg.fr123k.uk:8443", "The host of the secret operator server to use")
+	fs.StringVar(&host, "host", "https://wg.fr123k.uk:8443/secrets", "The host of the secret operator server to use")
 	_ = fs.Parse(os.Args[2:])
 
 	if token == "" {
