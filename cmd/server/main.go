@@ -2,17 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/containifyci/secret-operator/internal"
 	"github.com/containifyci/secret-operator/pkg/model"
+	"github.com/containifyci/secret-operator/pkg/token"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -57,6 +58,7 @@ func main() {
 
 func start() {
 	http.HandleFunc("/retrieve-secrets", RetrieveSecretsHandler)
+	http.HandleFunc("/generate-token", GenerateTokenHandler)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -68,8 +70,76 @@ func start() {
 	}
 }
 
+func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ServiceName string `json:"serviceName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.ServiceName == "" {
+		http.Error(w, "serviceName is required", http.StatusBadRequest)
+		return
+	}
+
+	clientIP := extractClientIP(r)
+
+	tokenStr, _, err := token.Generate(req.ServiceName, clientIP)
+	if err != nil {
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		log.Printf("Error generating token: %v", err)
+		return
+	}
+
+	ctx := r.Context()
+	smClient, err := secretmanager.NewClient(ctx)
+	if err != nil {
+		http.Error(w, "Failed to create Secret Manager client", http.StatusInternalServerError)
+		log.Printf("Error creating Secret Manager client: %v", err)
+		return
+	}
+	defer func() {
+		err := smClient.Close()
+		if err != nil {
+			log.Printf("Error closing Secret Manager client: %v", err)
+		}
+	}()
+
+	projectID := os.Getenv("GCP_PROJECT_ID")
+	if err := token.SaveToSecretManager(ctx, smClient, projectID, tokenStr); err != nil {
+		http.Error(w, "Failed to save token", http.StatusInternalServerError)
+		log.Printf("Error saving token: %v", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"token": tokenStr}); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		log.Printf("Error encoding response: %v", err)
+		return
+	}
+}
+
+func extractClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	client, err := secretmanager.NewClient(ctx)
 	if err != nil {
 		http.Error(w, "Failed to create Secret Manager client", http.StatusInternalServerError)
@@ -84,14 +154,14 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Retrieve token from the request header
-	token := r.Header.Get("Authorization")
-	if token == "" {
+	tokenStr := r.Header.Get("Authorization")
+	if tokenStr == "" {
 		http.Error(w, "Missing Authorization token", http.StatusUnauthorized)
 		return
 	}
 
 	// Validate and retrieve metadata from the token
-	metadata, err := validateAndDeleteToken(ctx, client, token)
+	metadata, err := validateAndDeleteToken(ctx, client, tokenStr)
 	if err != nil {
 		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
 		log.Printf("Error validating token: %v", err)
@@ -122,7 +192,7 @@ func RetrieveSecretsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, token string) (*model.TokenMetadata, error) {
+func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, tokenStr string) (*model.TokenMetadata, error) {
 	name := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", os.Getenv("GCP_PROJECT_ID"), internal.AuthenticationTokenName)
 
 	// Access the secret version
@@ -133,12 +203,12 @@ func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, t
 		return nil, fmt.Errorf("error accessing token secret: %w", err)
 	}
 
-	if strings.TrimSpace(string(resp.Payload.Data)) != token {
+	if strings.TrimSpace(string(resp.Payload.Data)) != tokenStr {
 		return nil, fmt.Errorf("token mismatch")
 	}
 
 	// Parse metadata from the secret
-	metadata, err := parseMetadataFromToken(string(resp.Payload.Data))
+	metadata, err := token.Decode(string(resp.Payload.Data))
 	if err != nil {
 		return nil, fmt.Errorf("error parsing token metadata: %w", err)
 	}
@@ -151,23 +221,6 @@ func validateAndDeleteToken(ctx context.Context, client *secretmanager.Client, t
 	}
 
 	return &metadata, nil
-}
-
-func parseMetadataFromToken(token string) (model.TokenMetadata, error) {
-	var metadata model.TokenMetadata
-
-	// Decode the Base64 token
-	decoded, err := base64.RawURLEncoding.DecodeString(token)
-	if err != nil {
-		return metadata, fmt.Errorf("failed to decode token: %w", err)
-	}
-
-	// Parse JSON metadata
-	if err := json.Unmarshal(decoded, &metadata); err != nil {
-		return metadata, fmt.Errorf("failed to parse metadata: %w", err)
-	}
-
-	return metadata, nil
 }
 
 func getSecretsForService(ctx context.Context, client *secretmanager.Client, serviceName string) (map[string]model.EnvSecret, map[string]model.FileSecret, error) {
