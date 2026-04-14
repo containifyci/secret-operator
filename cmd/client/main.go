@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,13 +14,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/containifyci/secret-operator/internal"
 	"github.com/containifyci/secret-operator/pkg/model"
+	"github.com/containifyci/secret-operator/pkg/token"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
-	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/containifyci/go-self-update/pkg/updater"
-	"github.com/golang/protobuf/ptypes/timestamp"
 )
 
 var (
@@ -63,16 +59,16 @@ func main() {
 }
 
 func fetch() {
-	var envFile, output, host, token string
+	var envFile, output, host, tokenFlag string
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flag.CommandLine = fs
-	fs.StringVar(&token, "token", "", "The name of the token secret")
+	fs.StringVar(&tokenFlag, "token", "", "The name of the token secret")
 	fs.StringVar(&envFile, "envFile", "t.env", "The envFile file to store the secrets in")
 	fs.StringVar(&output, "output", ".", "The output directory for secrets")
 	fs.StringVar(&host, "host", "https://wg.fr123k.uk:8443/secrets", "The host of the secret operator server to use")
 	_ = fs.Parse(os.Args[2:])
 
-	if token == "" {
+	if tokenFlag == "" {
 		log.Fatalf("The token arg is required")
 	}
 
@@ -88,7 +84,7 @@ func fetch() {
 		os.Exit(1)
 	}
 
-	req.Header.Set("Authorization", token)
+	req.Header.Set("Authorization", tokenFlag)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -228,77 +224,29 @@ func generate() {
 		log.Fatalf("Failed to retrieve client IP: %v", err)
 	}
 
-	tokenMetadata := model.TokenMetadata{
-		ServiceName: *serviceName,
-		ClientIP:    clientIP,
-		Nonce:       time.Now().UnixNano(),
-	}
-	tokenMetadata.RandomValue, err = generateRandomValue(16) // Generate a random 16-byte value
-	if err != nil {
-		log.Fatalf("Failed to generate random value: %v", err)
-	}
-
-	token, err := generateToken(tokenMetadata)
+	tokenStr, _, err := token.Generate(*serviceName, clientIP)
 	if err != nil {
 		log.Fatalf("Failed to generate token: %v", err)
 	}
-	fmt.Printf("Generated Token: %s\n", token)
+	fmt.Printf("Generated Token: %s\n", tokenStr)
 
 	projectID := os.Getenv("GCP_PROJECT_ID")
-	if err := saveTokenToSecretManager(projectID, token); err != nil {
-		log.Fatalf("Failed to save token to Secret Manager: %v", err)
-	}
-}
 
-func saveTokenToSecretManager(projectID, token string) error {
 	ctx := context.Background()
-	client, err := secretmanager.NewClient(ctx)
+	smClient, err := secretmanager.NewClient(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to create Secret Manager client: %w", err)
+		log.Fatalf("Failed to create Secret Manager client: %v", err)
 	}
 	defer func() {
-		err := client.Close()
+		err := smClient.Close()
 		if err != nil {
 			fmt.Printf("Error closing Secret Manager client: %v\n", err)
 		}
 	}()
 
-	secretID := internal.AuthenticationTokenName
-	secretName := fmt.Sprintf("projects/%s/secrets/%s", projectID, secretID)
-	_, err = client.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: secretName})
-	if err != nil {
-		_, err = client.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{
-			Parent:   fmt.Sprintf("projects/%s", projectID),
-			SecretId: secretID,
-			Secret: &secretmanagerpb.Secret{
-				Replication: &secretmanagerpb.Replication{
-					Replication: &secretmanagerpb.Replication_Automatic_{
-						Automatic: &secretmanagerpb.Replication_Automatic{},
-					},
-				},
-				Expiration: &secretmanagerpb.Secret_ExpireTime{
-					ExpireTime: &timestamp.Timestamp{
-						Seconds: time.Now().Add(15 * time.Minute).Unix(),
-					},
-				},
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create secret: %w", err)
-		}
+	if err := token.SaveToSecretManager(ctx, smClient, projectID, tokenStr); err != nil {
+		log.Fatalf("Failed to save token to Secret Manager: %v", err)
 	}
-
-	_, err = client.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{
-		Parent: secretName,
-		Payload: &secretmanagerpb.SecretPayload{
-			Data: []byte(token),
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add secret version: %w", err)
-	}
-
-	return nil
 }
 
 // TODO return all non localhost ip addresses
@@ -315,21 +263,4 @@ func getClientIP() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("could not determine client IP")
-}
-
-func generateRandomValue(length int) (string, error) {
-	bytes := make([]byte, length)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}
-
-func generateToken(metadata model.TokenMetadata) (string, error) {
-	metadataBytes, err := json.Marshal(metadata)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(metadataBytes), nil
 }
