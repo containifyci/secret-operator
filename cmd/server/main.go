@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/containifyci/secret-operator/internal"
+	"github.com/containifyci/secret-operator/pkg/auth"
 	"github.com/containifyci/secret-operator/pkg/model"
 	"github.com/containifyci/secret-operator/pkg/token"
 
@@ -57,14 +58,22 @@ func main() {
 }
 
 func start() {
+	ctx := context.Background()
+	projectID := os.Getenv("GCP_PROJECT_ID")
+
+	apiKey, err := auth.LoadAPIKey(ctx, projectID)
+	if err != nil {
+		log.Fatalf("Failed to load API key: %v", err)
+	}
+
 	http.HandleFunc("/retrieve-secrets", RetrieveSecretsHandler)
-	http.HandleFunc("/generate-token", GenerateTokenHandler)
+	http.HandleFunc("/generate-token", auth.RequireBearerAuth(apiKey, GenerateTokenHandler))
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	log.Printf("Starting server on port %s", port)
-	err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
+	err = http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Failed to start server: %v", err)
 	}
