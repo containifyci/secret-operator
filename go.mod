@@ -4,10 +4,10 @@ go 1.25.8
 
 require (
 	cloud.google.com/go/secretmanager v1.20.0
-	github.com/containifyci/go-self-update v0.2.5
+	github.com/containifyci/go-self-update v0.2.7
 	github.com/golang/protobuf v1.5.4
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/api v0.282.0
+	google.golang.org/api v0.283.0
 )
 
 require (
@@ -31,7 +31,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/mod v0.35.0 // indirect
+	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
