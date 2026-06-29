@@ -7,7 +7,7 @@ require (
 	github.com/containifyci/go-self-update v0.2.7
 	github.com/golang/protobuf v1.5.4
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/api v0.285.0
+	google.golang.org/api v0.286.0
 )
 
 require (
