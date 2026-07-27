@@ -146,7 +146,12 @@ func writeEnvSecrets(outputDir, envFile string, secrets map[string]model.EnvSecr
 	if err != nil {
 		return fmt.Errorf("failed to create .env file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			fmt.Printf("Error closing .env file: %v\n", err)
+		}
+	}()
 
 	for _, secret := range secrets {
 		line := fmt.Sprintf("%s=\"%s\"\n", secret.Key, secret.Value)

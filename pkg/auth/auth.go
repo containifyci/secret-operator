@@ -21,7 +21,12 @@ func LoadAPIKey(ctx context.Context, projectID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create Secret Manager client: %w", err)
 	}
-	defer client.Close()
+	defer func() {
+		err := client.Close()
+		if err != nil {
+			log.Printf("Error closing Secret Manager client: %v", err)
+		}
+	}()
 
 	name := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", projectID, internal.APIKeySecretName)
 	resp, err := client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
@@ -63,5 +68,7 @@ func unauthorized(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Unauthorized request to %s from %s", r.URL.Path, r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
-	json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"}); err != nil {
+		log.Printf("Error encoding unauthorized response: %v", err)
+	}
 }
