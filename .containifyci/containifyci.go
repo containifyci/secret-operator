@@ -32,6 +32,7 @@ func main() {
 	client.File = "cmd/client/main.go"
 
 	server := build.NewGoServiceBuild("secret-operator-server")
+	server.Image = ""
 	server.File = "cmd/server/main.go"
 	server.Properties = map[string]*build.ListValue{
 		"goreleaser": build.NewList("true"),
